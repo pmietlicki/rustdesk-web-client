@@ -142,7 +142,7 @@ class _ScanPageState extends State<ScanPage> {
       var key = values['key'] != null ? values['key'] as String : '';
       var api = values['api'] != null ? values['api'] as String : '';
       Timer(Duration(milliseconds: 60), () {
-        showServerSettingsWithValue(host, '', key, api);
+        showServerSettingsWithValue(host, host, key, api);
       });
     } catch (e) {
       showToast('Invalid QR code');
