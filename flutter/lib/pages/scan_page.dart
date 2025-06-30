@@ -176,7 +176,7 @@ void showServerSettingsWithValue(
                       },
                     )
                   ] +
-                  (isAndroid
+                  (true
                       ? [
                           TextFormField(
                             initialValue: relay,

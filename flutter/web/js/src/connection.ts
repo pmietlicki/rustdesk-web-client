@@ -144,9 +144,10 @@ export default class Connection {
 
   async connectRelay(rr: rendezvous.RelayResponse): Promise<void> {
     const pk = rr.pk;
-    const rawRelay = rr.relay_server
+    const rawRelay = localStorage.getItem("relay-server")
       || localStorage.getItem("custom-rendezvous-server")
       || localStorage.getItem("rendezvous-server")
+      || rr.relay_server
       || window.location.host;
     const uri = makeWsUri(rawRelay, "/ws/relay");
     const uuid = rr.uuid;
