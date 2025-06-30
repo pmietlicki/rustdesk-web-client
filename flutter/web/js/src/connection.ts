@@ -12,7 +12,8 @@ const HOSTS = [
   "10.115.10.123",
 ];
 let HOST = localStorage.getItem("rendezvous-server") || HOSTS[0];
-const SCHEMA = "ws://";
+const DEFAULT_SCHEMA = "https://";
+const DEFAULT_WS_SUFFIX = "/ws/id";
 
 type MsgboxCallback = (type: string, title: string, text: string) => void;
 type DrawCallback = (data: Uint8Array) => void;
@@ -429,7 +430,7 @@ export default class Connection {
       var tm = new Date().getTime();
       var i = 0;
       const n = vf.vp9s?.frames.length;
-      vf.vp9s.frames.forEach((f) => {
+      vf.vp9s.frames.forEach((f: any) => {
         dec.processFrame(f.data.slice(0).buffer, (ok: any) => {
           i++;
           if (i == n) this.sendVideoReceived();
@@ -750,14 +751,56 @@ function getrUriFromRs(
   isRelay: Boolean = false,
   roffset: number = 0
 ): string {
-  if (uri.indexOf(":") > 0) {
-    const tmp = uri.split(":");
-    const port = parseInt(tmp[1]);
-    uri = tmp[0] + ":" + (port + (isRelay ? roffset || 3 : 2));
-  } else {
-    uri += ":" + (PORT + (isRelay ? 3 : 2));
+  if (!uri) {
+    uri = HOST;
   }
-  return SCHEMA + uri;
+
+  // Check if protocol is already specified
+  const hasProtocol = /^(ws|wss|http|https):\/\//i.test(uri);
+  
+  if (hasProtocol) {
+    // If protocol is specified, use the URI as-is for relay connections
+    if (isRelay) {
+      return uri;
+    }
+    // For rendezvous connections, convert http/https to ws/wss
+    if (uri.startsWith('http://')) {
+      return uri.replace('http://', 'ws://');
+    } else if (uri.startsWith('https://')) {
+      return uri.replace('https://', 'wss://');
+    }
+    return uri;
+  }
+
+  // No protocol specified, use default behavior
+  let finalUri = uri;
+  
+  // Handle port logic only if no port is specified in the URI
+  if (uri.indexOf(":") > 0) {
+    // Port is already specified, use as-is for relay
+    if (isRelay) {
+      const tmp = uri.split(":");
+      const port = parseInt(tmp[1]);
+      finalUri = tmp[0] + ":" + (port + (roffset || 3));
+    }
+  } else {
+    // No port specified, add default port logic only for non-relay or when specifically needed
+    if (isRelay) {
+      finalUri += ":" + (PORT + 3);
+    } else {
+      // For rendezvous, don't automatically add port
+      // Let the user specify the complete URL
+    }
+  }
+
+  // Apply default protocol and suffix for rendezvous connections
+  if (!isRelay) {
+    // Use HTTPS by default and add /ws/id suffix
+    return DEFAULT_SCHEMA + finalUri + DEFAULT_WS_SUFFIX;
+  }
+
+  // For relay connections, use WebSocket protocol
+  return "ws://" + finalUri;
 }
 
 function hash(datas: (string | Uint8Array)[]): Uint8Array {
