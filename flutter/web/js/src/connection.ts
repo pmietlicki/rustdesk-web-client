@@ -144,9 +144,11 @@ export default class Connection {
 
   async connectRelay(rr: rendezvous.RelayResponse): Promise<void> {
     const pk = rr.pk;
-    const uri = rr.relay_server
-      ? rr.relay_server.replace(/^https?:\/\//, WS_SCHEME + "://").replace(/\/.*$/, "/ws/relay")
-      : buildRelayUri();
+    const rawRelay = rr.relay_server
+      || localStorage.getItem("custom-rendezvous-server")
+      || localStorage.getItem("rendezvous-server")
+      || window.location.host;
+    const uri = makeWsUri(rawRelay, "/ws/relay");
     const uuid = rr.uuid;
     console.log(new Date() + ": Connecting to relay server: " + uri);
     const ws = new Websock(uri, false);
@@ -768,36 +770,31 @@ export default class Connection {
 // }
 // testDelay();
 
+function makeWsUri(raw: string, suffix: "/ws/id" | "/ws/relay"): string {
+  // 1) URL complète => on ne change que le scheme
+  if (/^https?:\/\//.test(raw) || /^wss?:\/\//.test(raw)) {
+    return raw.replace(/^https?:\/\//, WS_SCHEME + "://");
+  }
+  // 2) chemin absolu (ex. "/foo/bar") => on l'attache au host de la page
+  if (raw.startsWith("/")) {
+    return `${WS_SCHEME}://${window.location.host}${raw}`;
+  }
+  // 3) simple host ou host:port => on ajoute scheme + suffixe
+  return `${WS_SCHEME}://${raw}${suffix}`;
+}
+
 function buildRendezvousUri(): string {
-  // Récupérer la valeur brute que l'utilisateur a mise
   const raw = localStorage.getItem("custom-rendezvous-server")
            || localStorage.getItem("rendezvous-server")
            || window.location.host;
-
-  // Si raw contient déjà '/' (donc un chemin), un protocole, ou un port, on le respecte
-  if (raw.includes("/") || raw.startsWith("http") || /:\d+$/.test(raw)) {
-    // Si l'utilisateur a mis 'http...' ou 'wss://...' on convertit juste le schéma
-    return raw.replace(/^https?:\/\//, WS_SCHEME + "://");
-  }
-
-  // Sinon, c'est juste un host, on lui colle le suffixe
-  return `${WS_SCHEME}://${raw}/ws/id`;
+  return makeWsUri(raw, "/ws/id");
 }
 
 function buildRelayUri(): string {
-  // Récupérer la valeur brute que l'utilisateur a mise
-  const raw = localStorage.getItem("custom-rendezvous-server")
-           || localStorage.getItem("rendezvous-server")
+  const raw = localStorage.getItem("custom-relay-server")
+           || localStorage.getItem("relay-server")
            || window.location.host;
-
-  // Si raw contient déjà '/' (donc un chemin), un protocole, ou un port, on le respecte
-  if (raw.includes("/") || raw.startsWith("http") || /:\d+$/.test(raw)) {
-    // Si l'utilisateur a mis 'http...' ou 'wss://...' on convertit juste le schéma
-    return raw.replace(/^https?:\/\//, WS_SCHEME + "://");
-  }
-
-  // Sinon, c'est juste un host, on lui colle le suffixe
-  return `${WS_SCHEME}://${raw}/ws/relay`;
+  return makeWsUri(raw, "/ws/relay");
 }
 
 function hash(datas: (string | Uint8Array)[]): Uint8Array {
