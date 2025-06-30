@@ -771,16 +771,19 @@ export default class Connection {
 // testDelay();
 
 function makeWsUri(raw: string, suffix: "/ws/id" | "/ws/relay"): string {
-  // 1) URL complète => on ne change que le scheme
-  if (/^https?:\/\//.test(raw) || /^wss?:\/\//.test(raw)) {
-    return raw.replace(/^https?:\/\//, WS_SCHEME + "://");
+  // 1) URL absolue (http://… ou ws://…/wss://…) → on force le scheme et on ajoute le suffixe
+  if (/^[a-z]+:\/\//i.test(raw)) {
+    const url = new URL(raw);
+    url.protocol = WS_SCHEME + ":";
+    // si le pathname est vide ou « / », on met le suffixe
+    if (url.pathname === "/" || url.pathname === "") {
+      url.pathname = suffix;
+    }
+    return url.toString();
   }
-  // 2) chemin absolu (ex. "/foo/bar") => on l'attache au host de la page
-  if (raw.startsWith("/")) {
-    return `${WS_SCHEME}://${window.location.host}${raw}`;
-  }
-  // 3) simple host ou host:port => on ajoute scheme + suffixe
-  return `${WS_SCHEME}://${raw}${suffix}`;
+
+  // 2) sinon raw est juste « host:port » ou un nom d’hôte → on n’ajoute PAS de suffixe
+  return `${WS_SCHEME}://${raw}`;
 }
 
 function buildRendezvousUri(): string {
