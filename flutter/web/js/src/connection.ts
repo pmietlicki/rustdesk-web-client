@@ -793,13 +793,6 @@ function buildRendezvousUri(): string {
   return makeWsUri(raw, "/ws/id");
 }
 
-function buildRelayUri(): string {
-  const raw = localStorage.getItem("custom-relay-server")
-           || localStorage.getItem("relay-server")
-           || window.location.host;
-  return makeWsUri(raw, "/ws/relay");
-}
-
 function hash(datas: (string | Uint8Array)[]): Uint8Array {
   const hasher = new sha256.Hash();
   datas.forEach((data) => {
