@@ -774,15 +774,20 @@ function makeWsUri(raw: string, suffix: "/ws/id" | "/ws/relay"): string {
   // 1) URL absolue (http://… ou ws://…/wss://…) → on force le scheme et on ajoute le suffixe
   if (/^[a-z]+:\/\//i.test(raw)) {
     const url = new URL(raw);
-    url.protocol = WS_SCHEME + ":";
+    // Construire manuellement l'URL WebSocket
+    const wsProtocol = WS_SCHEME;
+    const host = url.host;
+    let pathname = url.pathname;
+    
     // si le pathname est vide ou « / », on met le suffixe
-    if (url.pathname === "/" || url.pathname === "") {
-      url.pathname = suffix;
+    if (pathname === "/" || pathname === "") {
+      pathname = suffix;
     }
-    return url.toString();
+    
+    return `${wsProtocol}://${host}${pathname}${url.search}${url.hash}`;
   }
 
-  // 2) sinon raw est juste « host:port » ou un nom d’hôte → on n’ajoute PAS de suffixe
+  // 2) sinon raw est juste « host:port » ou un nom d'hôte → on n'ajoute PAS de suffixe
   return `${WS_SCHEME}://${raw}`;
 }
 
