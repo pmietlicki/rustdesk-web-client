@@ -774,8 +774,8 @@ function buildRendezvousUri(): string {
            || localStorage.getItem("rendezvous-server")
            || window.location.host;
 
-  // Si raw contient déjà '/' (donc un chemin) ou un protocole, on le respecte
-  if (raw.includes("/") || raw.startsWith("http")) {
+  // Si raw contient déjà '/' (donc un chemin), un protocole, ou un port, on le respecte
+  if (raw.includes("/") || raw.startsWith("http") || /:\d+$/.test(raw)) {
     // Si l'utilisateur a mis 'http...' ou 'wss://...' on convertit juste le schéma
     return raw.replace(/^https?:\/\//, WS_SCHEME + "://");
   }
@@ -790,8 +790,8 @@ function buildRelayUri(): string {
            || localStorage.getItem("rendezvous-server")
            || window.location.host;
 
-  // Si raw contient déjà '/' (donc un chemin) ou un protocole, on le respecte
-  if (raw.includes("/") || raw.startsWith("http")) {
+  // Si raw contient déjà '/' (donc un chemin), un protocole, ou un port, on le respecte
+  if (raw.includes("/") || raw.startsWith("http") || /:\d+$/.test(raw)) {
     // Si l'utilisateur a mis 'http...' ou 'wss://...' on convertit juste le schéma
     return raw.replace(/^https?:\/\//, WS_SCHEME + "://");
   }
