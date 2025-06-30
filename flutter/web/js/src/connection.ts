@@ -6,14 +6,8 @@ import * as sha256 from "fast-sha256";
 import * as globals from "./globals";
 import { decompress, mapKey, sleep } from "./common";
 
-const PORT = 21116;
-// only the first is used to init `HOST`
-const HOSTS = [
-  "10.115.10.123",
-];
-let HOST = localStorage.getItem("rendezvous-server") || HOSTS[0];
-const DEFAULT_SCHEMA = "https://";
-const DEFAULT_WS_SUFFIX = "/ws/id";
+// Automatic ws/wss protocol detection based on page protocol
+const WS_SCHEME = window.location.protocol === "https:" ? "wss" : "ws";
 
 type MsgboxCallback = (type: string, title: string, text: string) => void;
 type DrawCallback = (data: Uint8Array) => void;
@@ -28,7 +22,7 @@ export default class Connection {
   _msgbox: MsgboxCallback;
   _draw: DrawCallback;
   _peerInfo: message.PeerInfo | undefined;
-  _firstFrame: Boolean | undefined;
+  _firstFrame: boolean | undefined;
   _videoDecoder: any;
   _password: Uint8Array | undefined;
   _options: any;
@@ -56,7 +50,7 @@ export default class Connection {
     }
   }
 
-  async _start(id: string) {
+  async _start(id: string): Promise<void> {
     if (!this._options) {
       this._options = globals.getPeers()[id] || {};
     }
@@ -77,15 +71,32 @@ export default class Connection {
       }
     }, 1);
     this.loadVideoDecoder();
-    const uri = getDefaultUri();
+    const uri = buildRendezvousUri();
     const ws = new Websock(uri, true);
     this._ws = ws;
     this._id = id;
     console.log(
       new Date() + ": Conntecting to rendezvoous server: " + uri + ", for " + id
     );
-    await ws.open();
-    console.log(new Date() + ": Connected to rendezvoous server");
+    
+    // Retry logic for connection with exponential backoff
+    let retryCount = 0;
+    const maxRetries = 3;
+    while (retryCount <= maxRetries) {
+      try {
+        await ws.open();
+        console.log(new Date() + ": Connected to rendezvoous server");
+        break;
+      } catch (e) {
+        retryCount++;
+        if (retryCount > maxRetries) {
+          throw e;
+        }
+        const delay = Math.pow(2, retryCount) * 1000; // Exponential backoff
+        console.log(`Connection failed, retrying in ${delay}ms (attempt ${retryCount}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
     const conn_type = rendezvous.ConnType.DEFAULT_CONN;
     const nat_type = rendezvous.NatType.SYMMETRIC;
     const punch_hole_request = rendezvous.PunchHoleRequest.fromPartial({
@@ -131,19 +142,34 @@ export default class Connection {
     }
   }
 
-  async connectRelay(rr: rendezvous.RelayResponse) {
+  async connectRelay(rr: rendezvous.RelayResponse): Promise<void> {
     const pk = rr.pk;
-    let uri = rr.relay_server;
-    if (uri) {
-      uri = getrUriFromRs(uri, true, 2);
-    } else {
-      uri = getDefaultUri(true);
-    }
+    const uri = rr.relay_server
+      ? rr.relay_server.replace(/^https?:\/\//, WS_SCHEME + "://").replace(/\/.*$/, "/ws/relay")
+      : buildRelayUri();
     const uuid = rr.uuid;
     console.log(new Date() + ": Connecting to relay server: " + uri);
     const ws = new Websock(uri, false);
-    await ws.open();
-    console.log(new Date() + ": Connected to relay server");
+    
+    // Retry logic for relay connection
+    let retryCount = 0;
+    const maxRetries = 3;
+    while (retryCount <= maxRetries) {
+      try {
+        await ws.open();
+        console.log(new Date() + ": Connected to relay server");
+        break;
+      } catch (e) {
+        retryCount++;
+        if (retryCount > maxRetries) {
+          this.msgbox("error", "Connection Error", "Failed to connect to relay server after multiple attempts");
+          throw e;
+        }
+        const delay = Math.pow(2, retryCount) * 1000;
+        console.log(`Relay connection failed, retrying in ${delay}ms (attempt ${retryCount}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
     this._ws = ws;
     const request_relay = rendezvous.RequestRelay.fromPartial({
       licence_key: localStorage.getItem("key") || undefined,
@@ -155,7 +181,7 @@ export default class Connection {
     await this.msgLoop();
   }
 
-  async secure(pk: Uint8Array | undefined) {
+  async secure(pk: Uint8Array | undefined): Promise<boolean | undefined> {
     if (pk) {
       const RS_PK = "OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=";
       try {
@@ -232,7 +258,7 @@ export default class Connection {
     return true;
   }
 
-  async msgLoop() {
+  async msgLoop(): Promise<void> {
     while (true) {
       const msg = (await this._ws?.next()) as message.Message;
       if (msg?.hash) {
@@ -318,36 +344,36 @@ export default class Connection {
     }
   }
 
-  msgbox(type_: string, title: string, text: string) {
+  msgbox(type_: string, title: string, text: string): void {
     this._msgbox?.(type_, title, text);
   }
 
-  draw(frame: any) {
+  draw(frame: any): void {
     this._draw?.(frame);
     globals.draw(frame);
   }
 
-  close() {
+  close(): void {
     this._msgs = [];
     clearInterval(this._interval);
     this._ws?.close();
     this._videoDecoder?.close();
   }
 
-  refresh() {
+  refresh(): void {
     const misc = message.Misc.fromPartial({ refresh_video: true });
     this._ws?.sendMessage({ misc });
   }
 
-  setMsgbox(callback: MsgboxCallback) {
+  setMsgbox(callback: MsgboxCallback): void {
     this._msgbox = callback;
   }
 
-  setDraw(callback: DrawCallback) {
+  setDraw(callback: DrawCallback): void {
     this._draw = callback;
   }
 
-  login(password: string | undefined = undefined) {
+  login(password: string | undefined = undefined): void {
     if (password) {
       const salt = this._hash?.salt;
       let p = hash([password, salt!]);
@@ -366,7 +392,7 @@ export default class Connection {
     }
   }
 
-  async reconnect() {
+  async reconnect(): Promise<void> {
     this.close();
     await this.start(this._id);
   }
@@ -528,11 +554,11 @@ export default class Connection {
     return true;
   }
 
-  getRemember(): Boolean {
+  getRemember(): boolean {
     return this._options["remember"] || false;
   }
 
-  setRemember(v: Boolean) {
+  setRemember(v: boolean) {
     this.setOption("remember", v);
   }
 
@@ -556,10 +582,10 @@ export default class Connection {
     name: string,
     down: boolean,
     press: boolean,
-    alt: Boolean,
-    ctrl: Boolean,
-    shift: Boolean,
-    command: Boolean
+    alt: boolean,
+    ctrl: boolean,
+    shift: boolean,
+    command: boolean
   ) {
     const key_event = mapKey(name, globals.isDesktop());
     if (!key_event) return;
@@ -623,7 +649,7 @@ export default class Connection {
     this._ws?.sendMessage({ key_event });
   }
 
-  getMod(alt: Boolean, ctrl: Boolean, shift: Boolean, command: Boolean) {
+  getMod(alt: boolean, ctrl: boolean, shift: boolean, command: boolean) {
     const mod: message.ControlKey[] = [];
     if (alt) mod.push(message.ControlKey.Alt);
     if (ctrl) mod.push(message.ControlKey.Control);
@@ -636,10 +662,10 @@ export default class Connection {
     mask: number = 0,
     x: number = 0,
     y: number = 0,
-    alt: Boolean = false,
-    ctrl: Boolean = false,
-    shift: Boolean = false,
-    command: Boolean = false
+    alt: boolean = false,
+    ctrl: boolean = false,
+    shift: boolean = false,
+    command: boolean = false
   ) {
     const mouse_event = message.MouseEvent.fromPartial({
       mask,
@@ -692,7 +718,7 @@ export default class Connection {
 
   getImageQualityEnum(
     value: string,
-    ignoreDefault: Boolean
+    ignoreDefault: boolean
   ): message.ImageQuality | undefined {
     switch (value) {
       case "low":
@@ -725,82 +751,53 @@ export default class Connection {
   }
 }
 
-function testDelay() {
-  var nearest = "";
-  HOSTS.forEach((host) => {
-    const now = new Date().getTime();
-    new Websock(getrUriFromRs(host), true).open().then(() => {
-      console.log("latency of " + host + ": " + (new Date().getTime() - now));
-      if (!nearest) {
-        HOST = host;
-        localStorage.setItem("rendezvous-server", host);
-      }
-    });
-  });
+// Test delay function - currently disabled as HOSTS array was removed
+// If you need to test multiple hosts, define: const HOSTS = [HOST, "other.host"];
+// function testDelay() {
+//   var nearest = "";
+//   HOSTS.forEach((host: any) => {
+//     const now = new Date().getTime();
+//     new Websock(buildRendezvousUri(), true).open().then(() => {
+//       console.log("latency of " + host + ": " + (new Date().getTime() - now));
+//       if (!nearest) {
+//         HOST = host;
+//         localStorage.setItem("rendezvous-server", host);
+//       }
+//     });
+//   });
+// }
+// testDelay();
+
+function buildRendezvousUri(): string {
+  // Récupérer la valeur brute que l'utilisateur a mise
+  const raw = localStorage.getItem("custom-rendezvous-server")
+           || localStorage.getItem("rendezvous-server")
+           || window.location.host;
+
+  // Si raw contient déjà '/' (donc un chemin) ou un protocole, on le respecte
+  if (raw.includes("/") || raw.startsWith("http")) {
+    // Si l'utilisateur a mis 'http...' ou 'wss://...' on convertit juste le schéma
+    return raw.replace(/^https?:\/\//, WS_SCHEME + "://");
+  }
+
+  // Sinon, c'est juste un host, on lui colle le suffixe
+  return `${WS_SCHEME}://${raw}/ws/id`;
 }
 
-testDelay();
+function buildRelayUri(): string {
+  // Récupérer la valeur brute que l'utilisateur a mise
+  const raw = localStorage.getItem("custom-rendezvous-server")
+           || localStorage.getItem("rendezvous-server")
+           || window.location.host;
 
-function getDefaultUri(isRelay: Boolean = false): string {
-  const host = localStorage.getItem("custom-rendezvous-server");
-  return getrUriFromRs(host || HOST, isRelay);
-}
-
-function getrUriFromRs(
-  uri: string,
-  isRelay: Boolean = false,
-  roffset: number = 0
-): string {
-  if (!uri) {
-    uri = HOST;
+  // Si raw contient déjà '/' (donc un chemin) ou un protocole, on le respecte
+  if (raw.includes("/") || raw.startsWith("http")) {
+    // Si l'utilisateur a mis 'http...' ou 'wss://...' on convertit juste le schéma
+    return raw.replace(/^https?:\/\//, WS_SCHEME + "://");
   }
 
-  // Check if protocol is already specified
-  const hasProtocol = /^(ws|wss|http|https):\/\//i.test(uri);
-  
-  if (hasProtocol) {
-    // If protocol is specified, use the URI as-is for relay connections
-    if (isRelay) {
-      return uri;
-    }
-    // For rendezvous connections, convert http/https to ws/wss
-    if (uri.startsWith('http://')) {
-      return uri.replace('http://', 'ws://');
-    } else if (uri.startsWith('https://')) {
-      return uri.replace('https://', 'wss://');
-    }
-    return uri;
-  }
-
-  // No protocol specified, use default behavior
-  let finalUri = uri;
-  
-  // Handle port logic only if no port is specified in the URI
-  if (uri.indexOf(":") > 0) {
-    // Port is already specified, use as-is for relay
-    if (isRelay) {
-      const tmp = uri.split(":");
-      const port = parseInt(tmp[1]);
-      finalUri = tmp[0] + ":" + (port + (roffset || 3));
-    }
-  } else {
-    // No port specified, add default port logic only for non-relay or when specifically needed
-    if (isRelay) {
-      finalUri += ":" + (PORT + 3);
-    } else {
-      // For rendezvous, don't automatically add port
-      // Let the user specify the complete URL
-    }
-  }
-
-  // Apply default protocol and suffix for rendezvous connections
-  if (!isRelay) {
-    // Use HTTPS by default and add /ws/id suffix
-    return DEFAULT_SCHEMA + finalUri + DEFAULT_WS_SUFFIX;
-  }
-
-  // For relay connections, use WebSocket protocol
-  return "ws://" + finalUri;
+  // Sinon, c'est juste un host, on lui colle le suffixe
+  return `${WS_SCHEME}://${raw}/ws/relay`;
 }
 
 function hash(datas: (string | Uint8Array)[]): Uint8Array {
