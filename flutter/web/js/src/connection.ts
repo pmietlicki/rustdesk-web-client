@@ -788,8 +788,13 @@ function makeWsUri(raw: string, suffix: "/ws/id" | "/ws/relay"): string {
     return `${wsProtocol}://${host}${pathname}${url.search}${url.hash}`;
   }
 
-  // 2) sinon raw est juste « host:port » ou un nom d'hôte → on n'ajoute PAS de suffixe
-  return `${WS_SCHEME}://${raw}`;
+  // 2) HOST:PORT → pas de suffixe automatique
+  if (raw.includes(":")) {
+    return `${WS_SCHEME}://${raw}`;
+  }
+
+  // 3) HOST seul → ajoute le suffixe
+  return `${WS_SCHEME}://${raw}${suffix}`;
 }
 
 function buildRendezvousUri(): string {
